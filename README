@@ -1,0 +1,18 @@
+Dave's Git Toolkit
+------------------
+
+This is a loose collection of random tools that I have built to make
+working with git a little bit easier.  Unless otherwise noted in the
+files themselves, all these tools are released under the MIT license, so
+you can pretty much do whatever you want with them.
+
+At least one of these tools also expects to have some version of
+git-svn-clone-externals in your path (as of today I'm using the version
+with an md5sum of d0ee42c21f810d1259a5622abee21844).  You should be able
+to grab a copy from github at:
+
+  http://github.com/andrep/git-svn-clone-externals/tree/master
+  commit hash: ee202dffe045eefc8cc2c2fdf079ea2040047016
+
+-Dave
+2009-06-15

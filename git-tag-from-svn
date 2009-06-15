@@ -1,0 +1,60 @@
+#!/bin/zsh
+# usage: git-tag-from-svn release/mpich2-1.1
+# creates a git tag in the current repo from the given svn tag (will use
+# basename in order to strip off "release" or "dev")
+#
+# See the bottom of this file for license information (MIT License).
+#
+# Author: Dave Goodell <davidjgoodell@gmail.com>
+
+tags_url=https://svn.mcs.anl.gov/repos/mpi-private/mpich2/tags
+svn_tag=$1
+if [ -z "$svn_tag" ] ; then
+    echo "expected tag name as first parameter!"
+    exit 1
+fi
+git_tag_name=$(basename $svn_tag)
+
+copied_from_line=$(svn log --stop-on-copy -v $tags_url/$svn_tag | grep '(from [^ ]*:[0-9]*)')
+svn_revision=$(echo "$copied_from_line" | grep '(from /mpich2/trunk:[0-9]*)' | sed 's/^.*(from .*:\([0-9][0-9]*\).*$/\1/')
+if [ -z "$svn_revision" ] ; then
+    echo "Unable to determine trunk svn revision for svn tag '$svn_tag'."
+    echo "Either the tag doesn't exist or the tag isn't a tag on the trunk."
+    echo "Perhaps you can determine the tag info from the following log line:"
+    echo "$copied_from_line"
+    echo "git tag command syntax: git tag <TAG_NAME> <COMMIT_OR_OBJECT>"
+    echo "and don't forget that 'git svn find-rev rXXXX' will give you a commit object"
+    exit 1
+fi
+
+git_commit_hash=$(git svn find-rev r$svn_revision)
+if [ -z "$git_commit_hash" ] ; then
+    echo "unable to determine git commit hash for svn revision '$svn_revision'"
+    exit 1
+fi
+echo "creating git tag '$git_tag_name' from svn tag '$svn_tag' at '$git_commit_hash'"
+git tag $git_tag_name $git_commit_hash
+
+
+# Copyright (c) 2009 Dave Goodell
+#
+# Permission is hereby granted, free of charge, to any person
+# obtaining a copy of this software and associated documentation
+# files (the "Software"), to deal in the Software without
+# restriction, including without limitation the rights to use,
+# copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following
+# conditions:
+#
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+# WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+# OTHER DEALINGS IN THE SOFTWARE.

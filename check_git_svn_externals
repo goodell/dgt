@@ -1,0 +1,202 @@
+#!/usr/bin/env perl
+# This script only works for the current HEAD due to lame limitations of git-svn
+# that I don't feel like fixing or working around right now.  You also should be
+# in the root directory of your git repository.
+#
+# See the bottom of this file for license information (MIT License).
+#
+# Author: Dave Goodell <davidjgoodell@gmail.com>
+#
+# TODO:
+# - add caching of git svn show-externals results, based on repository/branch and revision number
+# - add --fix-safe and --fix-all options to run the "possible fix" commands automatically
+# - possibly delete and/or forcibly update external dirs that don't contain a magic sentinel file
+
+use strict;
+use warnings;
+
+use Getopt::Long;
+use File::Basename qw(dirname basename);
+
+# maximum amount of git history that will be searched for an svn breadcrumb
+my $HISTORY_SEARCH_LIMIT = 25;
+
+
+my $use_externals_dump_file = '';
+GetOptions(
+    "help" => \&print_usage_and_exit,
+    "use-externals-dump-file=s" => \$use_externals_dump_file,
+) or die "unable to parse options, stopped";
+
+#my ($br,$rev) = git_commit_hash_to_svn_revision("HEAD");
+#print "br=$br rev=$rev\n";
+
+my @externals = ();
+if ($use_externals_dump_file and -e $use_externals_dump_file) {
+    print "==> using svn:externals dump in '$use_externals_dump_file'\n";
+    @externals = qx(cat $use_externals_dump_file);
+}
+else {
+    # show-externals only works for the current HEAD
+    print "==> gathering svn:externals info for HEAD\n";
+    @externals = qx(git svn show-externals)
+}
+@externals = grep { m{^/} } @externals;
+
+foreach my $ext_line (@externals) {
+    my ($ext_path, $ext_rev, $ext_url) = split /\s+/, $ext_line;
+    my $ext_was_ok = 1;
+
+    #print STDERR "XXX DJG ext_path=$ext_path ext_rev=$ext_rev ext_url=$ext_url\n";
+
+    # clean up svn:externals formatting
+    $ext_path =~ s!^/!!;
+    $ext_rev =~ s/-r(\d+)/$1/;
+
+    print "==> examining '$ext_path'\n";
+
+    if (not -e $ext_path) {
+        print "warning: '$ext_path' does not exist, skipping further checks\n";
+        my $fix_cmd = "(cd " . dirname($ext_path) . " && git-svn-clone-externals)";
+        print "possible fix command '$fix_cmd'\n";
+        $ext_was_ok = 0;
+        next;
+    }
+    if (not -l $ext_path) {
+        print "warning: '$ext_path' is not a symlink, skipping further checks\n";
+        $ext_was_ok = 0;
+        next;
+    }
+
+    # double check that the nested repository is up to date
+    my $old_pwd = `pwd`;
+    chomp $old_pwd;
+    chdir $ext_path;
+
+    my ($actual_ext_br,$actual_ext_rev) = git_commit_hash_to_svn_revision("HEAD");
+    # check URLs for matching
+    my $actual_ext_url = qx(git config svn-remote.svn.url);
+    chomp $actual_ext_url;
+    my $full_actual_ext_url = $actual_ext_url;
+    $full_actual_ext_url .= "/$actual_ext_br" if $actual_ext_br;
+    if ($ext_url ne $full_actual_ext_url) {
+        print "warning: '$ext_path' URLs don't match, parent specifies:\n" .
+              "  '$ext_url'\n" .
+              "subdirectory is:\n" .
+              "  '$actual_ext_url/$actual_ext_br'\n";
+        $ext_was_ok = 0;
+    }
+
+    # check revision numbers for matching
+    if ($ext_rev != $actual_ext_rev) {
+        # there's an impedance mismatch between the way that git-svn views svn
+        # revision numbers (mostly as changesets, sorta like git commits) and
+        # the flexibilty that svn has with specifying revisions that didn't
+        # actually change the current path falling back to the last revision
+        # that did change the path
+        my $last_committed_rev = qx(svn log --limit 1 $ext_url\@$ext_rev | grep '^r[0-9]* |');
+        unless ($last_committed_rev) {
+            print "unable to determine the last committed rev for url=$ext_url\@$ext_rev, skipping\n";
+            next;
+        }
+        $last_committed_rev =~ s/^r(\d+) \|.*$/$1/;
+
+        if ($last_committed_rev != $actual_ext_rev) {
+            print "warning: '$ext_path' revision ($actual_ext_rev) doesn't match svn:externals revision in parent (specified=$ext_rev, last_committed=$last_committed_rev)\n";
+            my $fix_cmd = "(cd $ext_path && git checkout -f \$(git svn find-rev r$last_committed_rev))";
+            print "possible fix command '$fix_cmd'\n";
+            $ext_was_ok = 0;
+        }
+    }
+
+    if ($ext_was_ok) {
+        print "OK\n";
+    }
+    chdir $old_pwd;
+}
+
+###############################################
+
+sub print_usage_and_exit {
+    print<<EOT;
+Usage: $0 [--help] [--use-externals-dump-file=FILE]
+
+Examines the current git-svn repository (assumes you are in the root) for
+svn:externals definitions and double checks that they are all present as
+symlinks to other git-svn repositories with the correct versions checked out.
+EOT
+    exit 1;
+}
+
+# given a commit-ish, this routine figures out the svn branch and revision, if any
+sub git_commit_hash_to_svn_revision {
+    my $commit = shift;
+    my $branch = '';
+    my $rev = -1;
+
+    my $svn_url = qx(git config svn-remote.svn.url);
+    chomp $svn_url;
+    die "unable to determine git-svn url, stopped" unless $svn_url;
+
+    my $ancestor_num = 0;
+    while ($ancestor_num < $HISTORY_SEARCH_LIMIT) {
+        my @log_msg = qx(git log -1 $commit~$ancestor_num);
+        my ($git_svn_id_line) = grep { m/^\s*git-svn-id: \S+/ } @log_msg;
+        if (not $git_svn_id_line) {
+            ++$ancestor_num;
+            next;
+        }
+        chomp $git_svn_id_line;
+
+        if ($git_svn_id_line !~ m{git-svn-id: $svn_url/?(\S*)\@(\d+) [-0-9a-zA-Z]+}) {
+            die "unable to parse git-svn-id line:\n$git_svn_id_line\nstopped";
+        }
+
+        $branch = $1;
+        $rev = $2;
+        last;
+    }
+
+    return ($branch,$rev);
+}
+
+###############################################
+
+# slow, but will recursively compute the svn:externals for the current repo at
+# the given revision number
+#git svn show-externals -r XXXX
+
+# translates svn id to a git commit hash
+# supposedly it optionally takes a branch, but that didn't work for me in the past
+#git svn find-rev rXXXX
+
+# translates tree-ish to an svn revision number, if one corresponds
+#git svn find-rev tree-ish
+
+# the following doesn't care what is on the current branch, it performs the
+# query directly against the associated SVN URL, AFAICT
+#git svn log -1  --oneline | awk '{print $1}'
+
+
+# Copyright (c) 2009 Dave Goodell
+#
+# Permission is hereby granted, free of charge, to any person
+# obtaining a copy of this software and associated documentation
+# files (the "Software"), to deal in the Software without
+# restriction, including without limitation the rights to use,
+# copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following
+# conditions:
+#
+# The above copyright notice and this permission notice shall be
+# included in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+# OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+# WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+# OTHER DEALINGS IN THE SOFTWARE.
