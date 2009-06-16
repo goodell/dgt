@@ -118,7 +118,7 @@ foreach my $ext_line (@externals) {
 
         if ($last_committed_rev != $actual_ext_rev) {
             print "warning: '$ext_path' revision ($actual_ext_rev) doesn't match svn:externals revision in parent (specified=$ext_rev, last_committed=$last_committed_rev)\n";
-            my $fix_cmd = "(cd $ext_path && git checkout -f \$(git svn find-rev r$last_committed_rev))";
+            my $fix_cmd = "(cd $ext_path && git svn fetch && git checkout -f \$(git svn find-rev r$last_committed_rev))";
             print "possible fix command '$fix_cmd'\n";
             $ext_was_ok = 0;
         }
