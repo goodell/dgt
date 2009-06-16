@@ -8,7 +8,6 @@
 # Author: Dave Goodell <davidjgoodell@gmail.com>
 #
 # TODO:
-# - add caching of git svn show-externals results, based on repository/branch and revision number
 # - add --fix-safe and --fix-all options to run the "possible fix" commands automatically
 # - possibly delete and/or forcibly update external dirs that don't contain a magic sentinel file
 
@@ -20,7 +19,7 @@ use File::Basename qw(dirname basename);
 
 # maximum amount of git history that will be searched for an svn breadcrumb
 my $HISTORY_SEARCH_LIMIT = 25;
-
+my $CACHE_DIR = '/tmp/svn_externals_cache';
 
 my $use_externals_dump_file = '';
 GetOptions(
@@ -28,8 +27,7 @@ GetOptions(
     "use-externals-dump-file=s" => \$use_externals_dump_file,
 ) or die "unable to parse options, stopped";
 
-#my ($br,$rev) = git_commit_hash_to_svn_revision("HEAD");
-#print "br=$br rev=$rev\n";
+my ($head_branch,$head_rev) = git_commit_hash_to_svn_revision("HEAD");
 
 my @externals = ();
 if ($use_externals_dump_file and -e $use_externals_dump_file) {
@@ -38,16 +36,32 @@ if ($use_externals_dump_file and -e $use_externals_dump_file) {
 }
 else {
     # show-externals only works for the current HEAD
-    print "==> gathering svn:externals info for HEAD\n";
-    @externals = qx(git svn show-externals)
+    mkdir $CACHE_DIR unless -e $CACHE_DIR;
+    my $head_url = qx(git config svn-remote.svn.url);
+    chomp $head_url;
+    my $cwd = `pwd`;
+    chomp $cwd;
+    my $url_hash = crypt("$cwd|$head_url/$head_branch", 'unnecessary salt');
+    my $cache_file = "$url_hash.r$head_rev.externals_dump";
+    if (-e "$CACHE_DIR/$cache_file") {
+        # read from cache instead of performing an expensive dump over the network
+        print "==> reading svn:externals info from cache file $CACHE_DIR/$cache_file\n";
+        @externals = qx(cat $CACHE_DIR/$cache_file);
+    }
+    else {
+        print "==> gathering svn:externals info for HEAD\n";
+        @externals = qx(git svn show-externals);
+        print "==> caching results in file $CACHE_DIR/$cache_file\n";
+        open CACHE_FH, '>', "$CACHE_DIR/$cache_file";
+        print CACHE_FH @externals;
+        close CACHE_FH;
+    }
 }
 @externals = grep { m{^/} } @externals;
 
 foreach my $ext_line (@externals) {
     my ($ext_path, $ext_rev, $ext_url) = split /\s+/, $ext_line;
     my $ext_was_ok = 1;
-
-    #print STDERR "XXX DJG ext_path=$ext_path ext_rev=$ext_rev ext_url=$ext_url\n";
 
     # clean up svn:externals formatting
     $ext_path =~ s!^/!!;
