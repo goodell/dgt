@@ -95,6 +95,7 @@ foreach my $ext_line (@externals) {
         # actually change the current path falling back to the last revision
         # that did change the path
         my $last_committed_rev = qx(svn log --limit 1 $ext_url\@$ext_rev | grep '^r[0-9]* |');
+        chomp($last_committed_rev);
         unless ($last_committed_rev) {
             print "unable to determine the last committed rev for url=$ext_url\@$ext_rev, skipping\n";
             next;
