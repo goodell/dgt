@@ -71,7 +71,7 @@ foreach my $ext_line (@externals) {
 
     if (not -e $ext_path) {
         print "warning: '$ext_path' does not exist, skipping further checks\n";
-        my $fix_cmd = "(cd " . dirname($ext_path) . " && git-svn-clone-externals)";
+        my $fix_cmd = "(cd " . dirname($ext_path) . " && rm -rf .git_externals && git-svn-clone-externals)";
         print "possible fix command '$fix_cmd'\n";
         $ext_was_ok = 0;
         next;
