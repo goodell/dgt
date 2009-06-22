@@ -10,6 +10,7 @@
 # TODO:
 # - add --fix-safe and --fix-all options to run the "possible fix" commands automatically
 # - possibly delete and/or forcibly update external dirs that don't contain a magic sentinel file
+# - Handle recursive externals.  That is, externals that themselves have externals.
 
 use strict;
 use warnings;
