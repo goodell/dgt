@@ -155,7 +155,7 @@ sub git_commit_hash_to_svn_revision {
 
     my $ancestor_num = 0;
     while ($ancestor_num < $HISTORY_SEARCH_LIMIT) {
-        my @log_msg = qx(git log -1 $commit~$ancestor_num);
+        my @log_msg = qx(git log --pretty=full -1 $commit~$ancestor_num);
         my ($git_svn_id_line) = grep { m/^\s*git-svn-id: \S+/ } @log_msg;
         if (not $git_svn_id_line) {
             ++$ancestor_num;
